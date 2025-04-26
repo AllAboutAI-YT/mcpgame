@@ -104,4 +104,48 @@ To add new images to the TV:
 
 - The system no longer attempts to generate images directly, avoiding the 500 Internal Server errors.
 - Images are selected randomly from the directory when requested.
-- The system provides appropriate feedback when no images are available. 
+- The system provides appropriate feedback when no images are available.
+
+# Connecting to MCP Backend Server
+
+The MCPGame can connect to an external MCP Backend Server to enable advanced AI functionality for the terminal and TV interactions.
+
+## Configuration
+
+1. Open the `main.js` file and locate the configuration section at the top:
+
+```javascript
+// --- Configuration ---
+const MCP_BACKEND_URL = 'http://localhost:3001'; // MCP Terminal backend connection
+const IMAGE_SERVER_URL = 'http://localhost:3002'; // Image server connection
+```
+
+2. Update the `MCP_BACKEND_URL` to point to your MCP Backend Server:
+   - For local development: `http://localhost:PORT` (replace PORT with your backend port)
+   - For production: Use the full URL to your deployed backend server
+
+## Required API Endpoints
+
+Your MCP Backend Server should implement these endpoints:
+
+1. `GET /api/status` - Returns the status of the MCP system
+2. `POST /api/query` - Accepts user queries and returns AI responses
+
+## Response Format
+
+The query endpoint should return JSON in this format:
+
+```json
+{
+  "response": "Text to display in the terminal",
+  "spokenResponse": "Optional text for voice synthesis" 
+}
+```
+
+## Testing the Connection
+
+1. Start your MCP Backend Server
+2. Start the MCPGame server (`node server.js`)
+3. Open the game in a browser
+4. Interact with the computer terminal in the virtual house
+5. The game will connect to your MCP Backend Server when you use the terminal 
