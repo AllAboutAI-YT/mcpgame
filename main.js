@@ -184,12 +184,7 @@ function handleKeyDown(event) {
     if (event.key === 'Enter') {
         if (isTerminalOpen && document.activeElement === terminalInput) { 
             // If UI is open, send the query from input
-            if (interactionType === 'computer') {
-                sendQuery(terminalInput.value);
-            } else if (interactionType === 'tv') {
-                // For TV, generate an image with the provided prompt
-                requestNewImage();
-            }
+            sendQuery(terminalInput.value);
         } else if (!isTerminalOpen) {
             // Check which interactive object is nearby
             if (playerNearComputer) {
@@ -199,11 +194,6 @@ function handleKeyDown(event) {
                 interactionType = 'tv';
                 openTerminalUi();
                 terminalStatus.textContent = "TV REMOTE CONTROL";
-                // Immediately check for images when opening TV
-                checkForImages();
-                
-                // Add an instruction message
-                addMessageToLog("TV", "Type a prompt and press Enter to generate an image.");
             } else if (playerNearDoor) {
                 // Teleport player through the door
                 const houseSize = 20;
@@ -1025,20 +1015,14 @@ function requestNewImage() {
     // Request a new image for the TV
     console.log(`Requesting new image from ${IMAGE_SERVER_URL}/generate-image`);
     
-    // Get any prompt from terminal input if available
-    let prompt = "Generate a beautiful landscape scene for TV";
-    if (terminalInput && terminalInput.value.trim()) {
-        prompt = terminalInput.value.trim();
-        terminalInput.value = ''; // Clear the input
-    }
-    
     fetch(`${IMAGE_SERVER_URL}/generate-image`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            prompt: prompt
+            prompt: "Generate a beautiful landscape scene for TV", // Default prompt
+            // You could customize this with user input from terminalInput
         }),
     })
     .then(response => {
@@ -1052,18 +1036,12 @@ function requestNewImage() {
         
         if (data.imageUrl) {
             loadImageToDisplay(data.imageUrl);
-            if (terminalMessages) {
-                addMessageToLog("TV", `Generated image with prompt: "${prompt}"`);
-            }
         } else {
             console.warn("No image URL in response:", data);
         }
     })
     .catch(error => {
         console.error("Error generating image:", error);
-        if (terminalMessages) {
-            addMessageToLog("Error", `Failed to generate image: ${error.message}`);
-        }
     });
 }
 
