@@ -4,7 +4,7 @@ A multi-player control panel game with Node.js backend featuring a virtual house
 
 ## Features
 
-- 3D virtual house environment with fully rendered rooms
+- Immersive first-person 3D virtual house environment
 - Interactive TV with image generation capabilities
 - Computer terminal for accessing MCP systems
 - Realistic movement and collision detection
@@ -31,15 +31,17 @@ The server will start on port 3002.
 ## Game Controls
 
 - **Movement**: WASD keys
-- **Look**: Mouse movement
+- **Look around**: Mouse movement (click on game to enable)
 - **Interact**: Press ENTER when near interactive objects
 - **Exit interfaces**: ESC key
+- **Exit mouse lock**: ESC key
 
 ## Interactive Elements
 
 ### TV System
 - Approach the TV and press ENTER to access the remote control
 - Generate images that will display on the TV screen
+- Type a prompt for image generation in the terminal interface
 
 ### MCP Terminal
 - Find the computer desk and press ENTER to access the terminal
@@ -49,6 +51,7 @@ The server will start on port 3002.
 ## Technical Details
 
 - Built with Three.js for 3D rendering
+- First-person camera with pointer lock controls
 - Express.js server for backend communication
 - Canvas library for image generation
 - RESTful API for server communication 

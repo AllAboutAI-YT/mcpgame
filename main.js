@@ -5,6 +5,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'; // Optio
 const MCP_BACKEND_URL = 'http://localhost:3001'; // MCP Terminal backend connection
 const IMAGE_SERVER_URL = 'http://localhost:3002'; // Image server connection
 const INTERACTION_DISTANCE = 3.5; // How close the player needs to be to the terminal
+const PLAYER_HEIGHT = 1.7; // Player eye level in meters
+const PLAYER_MOVE_SPEED = 5.0; // Movement speed
+const PLAYER_TURN_SPEED = 0.03; // Mouse sensitivity
 
 // --- DOM Elements ---
 const canvas = document.getElementById('gameCanvas');
@@ -14,13 +17,14 @@ const terminalMessages = document.getElementById('terminalMessages');
 const terminalInput = document.getElementById('terminalInput');
 
 // --- State ---
-let scene, camera, renderer, controls; // Three.js basics
-let player, terminal, imageDisplay, currentImageTexture; // Game objects
+let scene, camera, renderer; // Three.js basics
+let player = { position: new THREE.Vector3(0, PLAYER_HEIGHT, 0), rotation: new THREE.Euler(0, 0, 0) }; 
+let imageDisplay, currentImageTexture; // Game objects
 let house, tv, computer, tvRemote; // House and interactive objects
 let keysPressed = {}; // Keyboard state
+let mouseLocked = false;
 const clock = new THREE.Clock();
 let isTerminalOpen = false;
-let isPlayerNearby = false;
 let playerNearTV = false; // Flag for TV interaction
 let playerNearComputer = false; // Flag for computer interaction
 let messageHistory = []; // Store conversation for context
@@ -148,8 +152,12 @@ function openTerminalUi() {
     fetchStatus(); // Fetch status when opening
     terminalInput.value = '';
     terminalInput.focus(); // Focus input field
-    // Optionally disable OrbitControls while UI is open
-    if (controls) controls.enabled = false;
+    
+    // Unlock pointer when UI is open
+    if (document.pointerLockElement === canvas) {
+        document.exitPointerLock();
+    }
+    mouseLocked = false;
 }
 
 function closeTerminalUi() {
@@ -161,9 +169,6 @@ function closeTerminalUi() {
     if (interactionType === 'tv') {
         requestNewImage();
     }
-    
-    // Re-enable OrbitControls
-    if (controls) controls.enabled = true;
     
     // Reset interaction type
     interactionType = '';
@@ -191,6 +196,9 @@ function handleKeyDown(event) {
     } else if (event.key === 'Escape') {
         if (isTerminalOpen) {
             closeTerminalUi();
+        } else if (document.pointerLockElement === canvas) {
+            document.exitPointerLock();
+            mouseLocked = false;
         }
     }
 }
@@ -199,24 +207,76 @@ function handleKeyUp(event) {
     keysPressed[event.key.toLowerCase()] = false;
 }
 
+function handleMouseDown(event) {
+    // Only lock on left click and when UI is not open
+    if (event.button === 0 && !isTerminalOpen && !mouseLocked) {
+        canvas.requestPointerLock();
+    }
+}
+
+function handleMouseMove(event) {
+    if (document.pointerLockElement === canvas) {
+        mouseLocked = true;
+        // Update player rotation
+        player.rotation.y -= event.movementX * PLAYER_TURN_SPEED;
+        
+        // Limit up/down looking to avoid flipping
+        const maxVerticalLook = Math.PI / 2 - 0.1; // Just under 90 degrees
+        const newVerticalAngle = camera.rotation.x + event.movementY * PLAYER_TURN_SPEED;
+        camera.rotation.x = Math.max(-maxVerticalLook, Math.min(maxVerticalLook, newVerticalAngle));
+    }
+}
+
+function handlePointerLockChange() {
+    mouseLocked = document.pointerLockElement === canvas;
+    
+    // Update instructions based on pointer lock state
+    updateInstructions();
+}
+
+function updateInstructions() {
+    const instructions = document.getElementById('instructions');
+    
+    if (isTerminalOpen) {
+        instructions.textContent = "Type your command and press Enter to interact";
+    } else if (!mouseLocked) {
+        instructions.textContent = "Click on the game to enable controls | WASD to move | ESC to release mouse";
+    } else if (playerNearComputer) {
+        instructions.textContent = "Press Enter to access MCP Terminal";
+    } else if (playerNearTV) {
+        instructions.textContent = "Press Enter to use TV Remote";
+    } else {
+        instructions.textContent = "WASD to move | Find Computer or TV to interact";
+    }
+}
+
 // --- Player Movement ---
 function updatePlayerMovement(deltaTime) {
-    if (isTerminalOpen) return; // Don't move if UI is open
+    if (isTerminalOpen || !mouseLocked) return; // Don't move if UI is open or mouse not locked
 
-    const moveSpeed = 5.0;
-    const moveDirection = new THREE.Vector3();
+    const moveSpeed = PLAYER_MOVE_SPEED * deltaTime;
+    const moveDirection = new THREE.Vector3(0, 0, 0);
 
-    if (keysPressed['w']) moveDirection.z -= 1;
-    if (keysPressed['s']) moveDirection.z += 1;
-    if (keysPressed['a']) moveDirection.x -= 1;
-    if (keysPressed['d']) moveDirection.x += 1;
+    // Calculate forward direction based on player's rotation
+    const forward = new THREE.Vector3(0, 0, -1);
+    forward.applyEuler(player.rotation);
+    
+    // Calculate right direction
+    const right = new THREE.Vector3(1, 0, 0);
+    right.applyEuler(player.rotation);
+    
+    // Apply movement inputs
+    if (keysPressed['w']) moveDirection.add(forward);
+    if (keysPressed['s']) moveDirection.add(forward.clone().negate());
+    if (keysPressed['a']) moveDirection.add(right.clone().negate());
+    if (keysPressed['d']) moveDirection.add(right);
 
+    // Normalize and apply movement if there is any
     if (moveDirection.lengthSq() > 0) {
         moveDirection.normalize();
         
         // Apply movement
-        player.position.x += moveDirection.x * moveSpeed * deltaTime;
-        player.position.z += moveDirection.z * moveSpeed * deltaTime;
+        player.position.addScaledVector(moveDirection, moveSpeed);
         
         // Constrain player to inside the house
         const houseSize = 20;
@@ -227,10 +287,8 @@ function updatePlayerMovement(deltaTime) {
         player.position.x = Math.max(-halfInnerSize, Math.min(halfInnerSize, player.position.x));
         player.position.z = Math.max(-halfInnerSize, Math.min(halfInnerSize, player.position.z));
         
-        // Update camera position to follow the player
-        camera.position.x = player.position.x;
-        camera.position.z = player.position.z + 2; // Position camera slightly behind player
-        camera.lookAt(player.position.x, player.position.y, player.position.z - 5); // Look ahead of player
+        // Update camera position to match player's eyes
+        camera.position.copy(player.position);
     }
 
     // Check proximity to interactive objects
@@ -238,14 +296,7 @@ function updatePlayerMovement(deltaTime) {
     playerNearTV = player.position.distanceTo(tv.position) < INTERACTION_DISTANCE;
     
     // Update instruction text based on proximity
-    const instructions = document.getElementById('instructions');
-    if (playerNearComputer) {
-        instructions.textContent = "Move: WASD | Look: Mouse | Press Enter to access MCP Terminal";
-    } else if (playerNearTV) {
-        instructions.textContent = "Move: WASD | Look: Mouse | Press Enter to use TV Remote";
-    } else {
-        instructions.textContent = "Move: WASD | Look: Mouse | Find Computer or TV to interact";
-    }
+    updateInstructions();
 }
 
 // --- Game Initialization ---
@@ -277,23 +328,13 @@ function init() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     
-    // Initialize camera
+    // Initialize camera (first-person view)
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 1.7, 4); // Position at eye level
+    camera.position.set(0, PLAYER_HEIGHT, 0); // Position at eye level
+    camera.lookAt(0, PLAYER_HEIGHT, -1); // Look forward
     
-    // Controls (optional, for debugging)
-    controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.enablePan = false;
-    controls.maxPolarAngle = Math.PI / 2 - 0.1; // Prevent going below ground
-    
-    // Create player object (just a simple cube for now)
-    const playerGeometry = new THREE.BoxGeometry(0.5, 1.7, 0.5);
-    const playerMaterial = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
-    player = new THREE.Mesh(playerGeometry, playerMaterial);
-    player.position.y = 0.85; // Half the player height
-    scene.add(player);
+    // Set initial player position (already defined at the top)
+    player.position.set(0, PLAYER_HEIGHT, 0);
     
     // Create house
     createHouse();
@@ -308,6 +349,9 @@ function init() {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('resize', onWindowResize);
+    canvas.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('pointerlockchange', handlePointerLockChange);
     
     // Fetch image when starting (optional)
     checkForImages();
@@ -518,10 +562,8 @@ function animate() {
     // Handle player movement
     updatePlayerMovement(deltaTime);
     
-    // Update controls (if enabled)
-    if (controls && controls.enabled) {
-        controls.update();
-    }
+    // Update camera rotation to match player's view direction
+    camera.rotation.y = player.rotation.y;
     
     renderer.render(scene, camera);
 }
