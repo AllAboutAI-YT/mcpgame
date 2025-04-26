@@ -44,68 +44,51 @@ app.get('/api/status', (req, res) => {
     });
 });
 
-// Helper function to create a dummy image
-function createDummyImage(filename, text) {
-    const { createCanvas } = require('canvas');
-    const canvas = createCanvas(800, 450);
-    const ctx = canvas.getContext('2d');
-
-    // Background
-    ctx.fillStyle = '#3498db';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Text
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '36px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(text || 'Generated TV Image', canvas.width / 2, canvas.height / 2);
-    ctx.font = '24px Arial';
-    ctx.fillText(new Date().toLocaleString(), canvas.width / 2, canvas.height / 2 + 50);
-
-    // Save to file
-    const out = fs.createWriteStream(filename);
-    const stream = canvas.createPNGStream();
-    stream.pipe(out);
-    
-    return new Promise((resolve, reject) => {
-        out.on('finish', () => resolve(filename));
-        out.on('error', reject);
-    });
-}
-
-// New endpoint for generating images for the TV
+// New endpoint for displaying existing images from the directory
 app.post('/generate-image', async (req, res) => {
-    console.log("Image generation request received");
-    const { prompt } = req.body;
+    console.log("Image request received - redirecting to display existing images");
     
     try {
-        // Create a directory if it doesn't exist
+        // Get the latest image from the directory and return its URL
         const imageDir = path.join(__dirname, 'server/openai-server/public/image');
+        
+        // Ensure directory exists
         if (!fs.existsSync(imageDir)) {
             fs.mkdirSync(imageDir, { recursive: true });
+            return res.status(404).json({
+                success: false,
+                message: 'No images available yet'
+            });
         }
         
-        // Generate a unique filename
-        const timestamp = Date.now();
-        const filename = path.join(imageDir, `tv_image_${timestamp}.png`);
+        // Get image files
+        const files = fs.readdirSync(imageDir);
+        const imageFiles = files.filter(file => 
+            /\.(jpg|jpeg|png|gif|webp)$/i.test(file)
+        );
         
-        // For simplicity, create a dummy image
-        // In a real implementation, you would use an image generation API
-        await createDummyImage(filename, prompt);
+        if (imageFiles.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'No image files found'
+            });
+        }
         
-        // Return the URL to the image
-        const imageUrl = `/image/tv_image_${timestamp}.png`;
+        // Get a random image from the directory to simulate "generating" a new one
+        const randomIndex = Math.floor(Math.random() * imageFiles.length);
+        const randomImageFile = imageFiles[randomIndex];
+        const imageUrl = `/image/${randomImageFile}`;
         
         res.json({
             success: true,
-            message: 'Image generated successfully',
+            message: 'Image found successfully',
             imageUrl: imageUrl
         });
     } catch (err) {
-        console.error("Error generating image:", err);
+        console.error("Error handling image request:", err);
         res.status(500).json({
             success: false,
-            message: 'Error generating image',
+            message: 'Error handling image request',
             error: err.message
         });
     }
@@ -124,21 +107,11 @@ app.get('/latest-image', (req, res) => {
         if (!fs.existsSync(imageDir)) {
             console.log("Directory doesn't exist, creating it");
             fs.mkdirSync(imageDir, { recursive: true });
-            
-            // Create a default image
-            const defaultFilename = path.join(imageDir, 'default_tv.png');
-            createDummyImage(defaultFilename, 'Welcome to MCP TV')
-                .then(() => {
-                    res.json({ 
-                        success: true,
-                        message: 'Default image created',
-                        imageUrl: '/image/default_tv.png'
-                    });
-                })
-                .catch(err => {
-                    throw err;
-                });
-            return;
+            return res.json({ 
+                success: false,
+                message: 'No images available - directory was just created',
+                imageUrl: null
+            });
         }
         
         // Get all files in the directory
@@ -152,20 +125,11 @@ app.get('/latest-image', (req, res) => {
         console.log("Image files found:", imageFiles);
         
         if (imageFiles.length === 0) {
-            // Create a default image if none exists
-            const defaultFilename = path.join(imageDir, 'default_tv.png');
-            createDummyImage(defaultFilename, 'Welcome to MCP TV')
-                .then(() => {
-                    res.json({ 
-                        success: true,
-                        message: 'Default image created',
-                        imageUrl: '/image/default_tv.png'
-                    });
-                })
-                .catch(err => {
-                    throw err;
-                });
-            return;
+            return res.json({ 
+                success: false,
+                message: 'No image files found in directory',
+                imageUrl: null
+            });
         }
         
         // Sort by modification time (most recent first)
@@ -256,7 +220,7 @@ app.get('/api/latest-image', (req, res) => {
 app.post('/api/query', (req, res) => {
     // For now, just echo back what was sent
     // In a real implementation, this would pass the query to appropriate MCP tools
-    const responseText = "I received your message. If you ask me to generate an image, I'll create one for you!";
+    const responseText = "I received your message. If you ask me to display an image, I'll show one from the gallery!";
     
     res.json({
         response: responseText,

@@ -1012,43 +1012,23 @@ function animate() {
 }
 
 function requestNewImage() {
-    // Request a new image for the TV
-    console.log(`Requesting new image from ${IMAGE_SERVER_URL}/generate-image`);
+    // Instead of generating a new image, just check for existing images
+    console.log("Requesting to display a new image from existing files");
     
-    fetch(`${IMAGE_SERVER_URL}/generate-image`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            prompt: "Generate a beautiful landscape scene for TV", // Default prompt
-            // You could customize this with user input from terminalInput
-        }),
-    })
-    .then(response => {
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json();
-    })
-    .then(data => {
-        console.log("Image generation response:", data);
-        
-        if (data.imageUrl) {
-            loadImageToDisplay(data.imageUrl);
-        } else {
-            console.warn("No image URL in response:", data);
-        }
-    })
-    .catch(error => {
-        console.error("Error generating image:", error);
-    });
+    // Force an immediate check for images, bypassing the time check
+    lastCheckedImageTime = 0;
+    checkForImages();
+    
+    // Add a message to the terminal if it's open
+    if (isTerminalOpen) {
+        addMessageToLog("System", "Checking for available images in the gallery...");
+    }
 }
 
 function checkForImages() {
-    // Don't check too frequently
+    // Don't check too frequently - increased to 10 seconds
     const now = Date.now();
-    if (now - lastCheckedImageTime < 2000) return; 
+    if (now - lastCheckedImageTime < 10000) return; 
     lastCheckedImageTime = now;
     
     console.log(`Checking for images at ${IMAGE_SERVER_URL}/latest-image`);
@@ -1071,6 +1051,11 @@ function checkForImages() {
                 loadImageToDisplay(data.latestImage);
             } else {
                 console.warn("No image found in response:", data);
+                
+                // Display a message in the terminal if open
+                if (isTerminalOpen) {
+                    addMessageToLog("System", "No images available in the gallery.");
+                }
             }
         })
         .catch(error => {
@@ -1087,6 +1072,11 @@ function checkForImages() {
                 })
                 .catch(fallbackError => {
                     console.error("Error fetching from legacy endpoint:", fallbackError);
+                    
+                    // Display a message in the terminal if open
+                    if (isTerminalOpen) {
+                        addMessageToLog("System", "Unable to connect to the image gallery.");
+                    }
                 });
         });
 }
