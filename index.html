@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Three.js MCP Terminal</title>
+    <title>MCP Game - Virtual House</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #333; color: #eee; font-family: sans-serif; }
         canvas { display: block; }
@@ -12,9 +12,13 @@
             top: 10px;
             left: 10px;
             background-color: rgba(0, 0, 0, 0.5);
-            padding: 5px 10px;
+            padding: 8px 15px;
             border-radius: 5px;
-            font-size: 0.9em;
+            font-size: 1em;
+            transition: background-color 0.3s;
+        }
+        #instructions:hover {
+            background-color: rgba(0, 0, 0, 0.8);
         }
         #terminalUi {
             display: none; /* Hidden by default, will be set to flex when open */
@@ -34,6 +38,7 @@
             padding: 15px;
             box-sizing: border-box;
             flex-direction: column; /* Arrange children vertically */
+            z-index: 100;
         }
         #terminalStatus {
             padding-bottom: 10px;
@@ -69,11 +74,23 @@
             font-size: 1em;
             outline: none;
         }
+        #tvRemoteUi {
+            color: #fff;
+        }
+        .help-text {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.8em;
+        }
     </style>
 </head>
 <body>
     <div id="instructions">
-        Move: WASD | Look: Mouse (Click & Drag) | Interact: Get close to Cube & Press Enter | Close UI: Esc
+        Move: WASD | Look: Mouse | Explore the house and find the TV and Computer
     </div>
     <canvas id="gameCanvas"></canvas>
 
@@ -85,6 +102,10 @@
             <span>></span>
             <input type="text" id="terminalInput" autocomplete="off" spellcheck="false">
         </div>
+    </div>
+
+    <div class="help-text">
+        Press ESC to close any open interface | ENTER to interact
     </div>
 
     <!-- Import Three.js -->

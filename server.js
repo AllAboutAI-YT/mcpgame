@@ -9,6 +9,9 @@ const PORT = process.env.PORT || 3002;
 // Enable CORS for all routes
 app.use(cors());
 
+// Parse JSON request bodies
+app.use(express.json());
+
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, 'server/openai-server/public')));
 
@@ -41,8 +44,75 @@ app.get('/api/status', (req, res) => {
     });
 });
 
-// Endpoint to get the latest image
-app.get('/api/latest-image', (req, res) => {
+// Helper function to create a dummy image
+function createDummyImage(filename, text) {
+    const { createCanvas } = require('canvas');
+    const canvas = createCanvas(800, 450);
+    const ctx = canvas.getContext('2d');
+
+    // Background
+    ctx.fillStyle = '#3498db';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Text
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '36px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(text || 'Generated TV Image', canvas.width / 2, canvas.height / 2);
+    ctx.font = '24px Arial';
+    ctx.fillText(new Date().toLocaleString(), canvas.width / 2, canvas.height / 2 + 50);
+
+    // Save to file
+    const out = fs.createWriteStream(filename);
+    const stream = canvas.createPNGStream();
+    stream.pipe(out);
+    
+    return new Promise((resolve, reject) => {
+        out.on('finish', () => resolve(filename));
+        out.on('error', reject);
+    });
+}
+
+// New endpoint for generating images for the TV
+app.post('/generate-image', async (req, res) => {
+    console.log("Image generation request received");
+    const { prompt } = req.body;
+    
+    try {
+        // Create a directory if it doesn't exist
+        const imageDir = path.join(__dirname, 'server/openai-server/public/image');
+        if (!fs.existsSync(imageDir)) {
+            fs.mkdirSync(imageDir, { recursive: true });
+        }
+        
+        // Generate a unique filename
+        const timestamp = Date.now();
+        const filename = path.join(imageDir, `tv_image_${timestamp}.png`);
+        
+        // For simplicity, create a dummy image
+        // In a real implementation, you would use an image generation API
+        await createDummyImage(filename, prompt);
+        
+        // Return the URL to the image
+        const imageUrl = `/image/tv_image_${timestamp}.png`;
+        
+        res.json({
+            success: true,
+            message: 'Image generated successfully',
+            imageUrl: imageUrl
+        });
+    } catch (err) {
+        console.error("Error generating image:", err);
+        res.status(500).json({
+            success: false,
+            message: 'Error generating image',
+            error: err.message
+        });
+    }
+});
+
+// Updated endpoint to get the latest image
+app.get('/latest-image', (req, res) => {
     console.log("Latest image request received");
     
     // Get the image directory
@@ -54,7 +124,21 @@ app.get('/api/latest-image', (req, res) => {
         if (!fs.existsSync(imageDir)) {
             console.log("Directory doesn't exist, creating it");
             fs.mkdirSync(imageDir, { recursive: true });
-            return res.json({ message: 'No images found - directory was just created', latestImage: null });
+            
+            // Create a default image
+            const defaultFilename = path.join(imageDir, 'default_tv.png');
+            createDummyImage(defaultFilename, 'Welcome to MCP TV')
+                .then(() => {
+                    res.json({ 
+                        success: true,
+                        message: 'Default image created',
+                        imageUrl: '/image/default_tv.png'
+                    });
+                })
+                .catch(err => {
+                    throw err;
+                });
+            return;
         }
         
         // Get all files in the directory
@@ -66,6 +150,75 @@ app.get('/api/latest-image', (req, res) => {
             /\.(jpg|jpeg|png|gif|webp)$/i.test(file)
         );
         console.log("Image files found:", imageFiles);
+        
+        if (imageFiles.length === 0) {
+            // Create a default image if none exists
+            const defaultFilename = path.join(imageDir, 'default_tv.png');
+            createDummyImage(defaultFilename, 'Welcome to MCP TV')
+                .then(() => {
+                    res.json({ 
+                        success: true,
+                        message: 'Default image created',
+                        imageUrl: '/image/default_tv.png'
+                    });
+                })
+                .catch(err => {
+                    throw err;
+                });
+            return;
+        }
+        
+        // Sort by modification time (most recent first)
+        imageFiles.sort((a, b) => {
+            const statA = fs.statSync(path.join(imageDir, a));
+            const statB = fs.statSync(path.join(imageDir, b));
+            return statB.mtime.getTime() - statA.mtime.getTime();
+        });
+        
+        // Get the most recent image
+        const latestImageFile = imageFiles[0];
+        console.log("Latest image file:", latestImageFile);
+        
+        // Return the most recent image path
+        const imageUrl = '/image/' + latestImageFile;
+        
+        res.json({ 
+            success: true,
+            message: 'Latest image found',
+            imageUrl: imageUrl,
+            totalImages: imageFiles.length
+        });
+    } catch (err) {
+        console.error("Error finding latest image:", err);
+        res.status(500).json({ 
+            success: false,
+            message: 'Error finding latest image', 
+            error: err.message
+        });
+    }
+});
+
+// Legacy endpoint for API compatibility
+app.get('/api/latest-image', (req, res) => {
+    console.log("Legacy API request for latest image");
+    
+    // Get the image directory
+    const imageDir = path.join(__dirname, 'server/openai-server/public/image');
+    
+    try {
+        // Check if directory exists
+        if (!fs.existsSync(imageDir)) {
+            fs.mkdirSync(imageDir, { recursive: true });
+            return res.json({ message: 'No images found - directory was just created', latestImage: null });
+        }
+        
+        // Get all files in the directory
+        const files = fs.readdirSync(imageDir);
+        
+        // Filter image files
+        const imageFiles = files.filter(file => 
+            /\.(jpg|jpeg|png|gif|webp)$/i.test(file)
+        );
         
         if (imageFiles.length === 0) {
             return res.json({ message: 'No image files found in directory', latestImage: null });
@@ -80,7 +233,6 @@ app.get('/api/latest-image', (req, res) => {
         
         // Get the most recent image
         const latestImageFile = imageFiles[0];
-        console.log("Latest image file:", latestImageFile);
         
         // Return the most recent image path
         const latestImagePath = 'image/' + latestImageFile;

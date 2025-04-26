@@ -16,12 +16,16 @@ const terminalInput = document.getElementById('terminalInput');
 // --- State ---
 let scene, camera, renderer, controls; // Three.js basics
 let player, terminal, imageDisplay, currentImageTexture; // Game objects
+let house, tv, computer, tvRemote; // House and interactive objects
 let keysPressed = {}; // Keyboard state
 const clock = new THREE.Clock();
 let isTerminalOpen = false;
 let isPlayerNearby = false;
+let playerNearTV = false; // Flag for TV interaction
+let playerNearComputer = false; // Flag for computer interaction
 let messageHistory = []; // Store conversation for context
 let lastCheckedImageTime = 0; // Track when we last checked for new images
+let interactionType = ''; // 'tv', 'computer', or empty
 
 // --- Backend Interaction ---
 
@@ -154,10 +158,15 @@ function closeTerminalUi() {
     terminalUi.style.display = 'none';
     
     // Check for new images when closing the terminal
-    checkForImages();
+    if (interactionType === 'tv') {
+        requestNewImage();
+    }
     
     // Re-enable OrbitControls
     if (controls) controls.enabled = true;
+    
+    // Reset interaction type
+    interactionType = '';
 }
 
 // --- Input Handling ---
@@ -165,12 +174,19 @@ function handleKeyDown(event) {
     keysPressed[event.key.toLowerCase()] = true;
 
     if (event.key === 'Enter') {
-        if (isTerminalOpen && document.activeElement === terminalInput) { // Only send if input has focus
+        if (isTerminalOpen && document.activeElement === terminalInput) { 
             // If UI is open, send the query from input
             sendQuery(terminalInput.value);
-        } else if (!isTerminalOpen && isPlayerNearby) {
-            // If UI is closed but player is near, open it
-            openTerminalUi();
+        } else if (!isTerminalOpen) {
+            // Check which interactive object is nearby
+            if (playerNearComputer) {
+                interactionType = 'computer';
+                openTerminalUi();
+            } else if (playerNearTV) {
+                interactionType = 'tv';
+                openTerminalUi();
+                terminalStatus.textContent = "TV REMOTE CONTROL";
+            }
         }
     } else if (event.key === 'Escape') {
         if (isTerminalOpen) {
@@ -197,243 +213,386 @@ function updatePlayerMovement(deltaTime) {
 
     if (moveDirection.lengthSq() > 0) {
         moveDirection.normalize();
+        
+        // Apply movement
+        player.position.x += moveDirection.x * moveSpeed * deltaTime;
+        player.position.z += moveDirection.z * moveSpeed * deltaTime;
+        
+        // Constrain player to inside the house
+        const houseSize = 20;
+        const wallThickness = 1;
+        const innerSize = houseSize - wallThickness * 2;
+        const halfInnerSize = innerSize / 2;
+        
+        player.position.x = Math.max(-halfInnerSize, Math.min(halfInnerSize, player.position.x));
+        player.position.z = Math.max(-halfInnerSize, Math.min(halfInnerSize, player.position.z));
+        
+        // Update camera position to follow the player
+        camera.position.x = player.position.x;
+        camera.position.z = player.position.z + 2; // Position camera slightly behind player
+        camera.lookAt(player.position.x, player.position.y, player.position.z - 5); // Look ahead of player
+    }
 
-        // Apply rotation based on camera direction (simplified)
-         const cameraDirection = new THREE.Vector3();
-         camera.getWorldDirection(cameraDirection);
-         cameraDirection.y = 0; // Project onto XZ plane
-         cameraDirection.normalize();
-
-         const rightDirection = new THREE.Vector3().crossVectors(camera.up, cameraDirection).normalize(); // Calculate right vector
-
-         const finalMove = new THREE.Vector3();
-         finalMove.addScaledVector(cameraDirection, moveDirection.z); // Forward/backward based on camera
-         finalMove.addScaledVector(rightDirection, moveDirection.x); // Left/right based on camera
-         finalMove.normalize();
-
-
-        player.position.addScaledVector(finalMove, moveSpeed * deltaTime);
+    // Check proximity to interactive objects
+    playerNearComputer = player.position.distanceTo(computer.position) < INTERACTION_DISTANCE;
+    playerNearTV = player.position.distanceTo(tv.position) < INTERACTION_DISTANCE;
+    
+    // Update instruction text based on proximity
+    const instructions = document.getElementById('instructions');
+    if (playerNearComputer) {
+        instructions.textContent = "Move: WASD | Look: Mouse | Press Enter to access MCP Terminal";
+    } else if (playerNearTV) {
+        instructions.textContent = "Move: WASD | Look: Mouse | Press Enter to use TV Remote";
+    } else {
+        instructions.textContent = "Move: WASD | Look: Mouse | Find Computer or TV to interact";
     }
 }
 
-
-// --- Initialization ---
+// --- Game Initialization ---
 function init() {
-    // Scene
+    // Create scene
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x222233);
-    scene.fog = new THREE.Fog(0x222233, 10, 40); // Add some fog
-
-    // Camera
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 5, 10); // Start position looking towards origin
-
-    // Renderer
-    renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.shadowMap.enabled = true; // Enable shadows
-
-    // Lights
-    const ambientLight = new THREE.AmbientLight(0xcccccc, 0.5);
+    scene.background = new THREE.Color(0x87CEEB); // Sky blue background
+    
+    // Add ambient light
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
+    
+    // Add directional light (sunlight)
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(5, 10, 7);
+    directionalLight.position.set(10, 20, 10);
     directionalLight.castShadow = true;
+    directionalLight.shadow.mapSize.width = 2048;
+    directionalLight.shadow.mapSize.height = 2048;
+    directionalLight.shadow.camera.near = 0.5;
+    directionalLight.shadow.camera.far = 50;
+    directionalLight.shadow.camera.left = -20;
+    directionalLight.shadow.camera.right = 20;
+    directionalLight.shadow.camera.top = 20;
+    directionalLight.shadow.camera.bottom = -20;
     scene.add(directionalLight);
 
-    // Floor
-    const floorGeometry = new THREE.PlaneGeometry(50, 50);
-    const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x888888, side: THREE.DoubleSide });
-    const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    scene.add(floor);
-
-    // Player (Capsule shape)
-    const playerRadius = 0.5;
-    const playerHeight = 1.0; // Height of the cylinder part
-    const playerGeometry = new THREE.CapsuleGeometry(playerRadius, playerHeight, 4, 16); // Simpler geometry
+    // Initialize renderer
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    
+    // Initialize camera
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 1.7, 4); // Position at eye level
+    
+    // Controls (optional, for debugging)
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.enablePan = false;
+    controls.maxPolarAngle = Math.PI / 2 - 0.1; // Prevent going below ground
+    
+    // Create player object (just a simple cube for now)
+    const playerGeometry = new THREE.BoxGeometry(0.5, 1.7, 0.5);
     const playerMaterial = new THREE.MeshStandardMaterial({ color: 0x00ff00 });
     player = new THREE.Mesh(playerGeometry, playerMaterial);
-    player.position.y = playerHeight / 2 + playerRadius; // Sit on the ground
-    player.castShadow = true;
+    player.position.y = 0.85; // Half the player height
     scene.add(player);
-
-    // Adjust camera to follow player slightly (simple offset)
-    // Controls will handle the camera relative to the player's position
-    // camera.position.set(player.position.x, player.position.y + 4, player.position.z + 6);
-    // camera.lookAt(player.position);
-
-
-    // Terminal
-    const terminalGeometry = new THREE.BoxGeometry(1, 1.5, 0.5);
-    const terminalMaterial = new THREE.MeshStandardMaterial({ color: 0xaaaaaa });
-    terminal = new THREE.Mesh(terminalGeometry, terminalMaterial);
-    terminal.position.set(5, 0.75, 0); // Place it somewhere
-    terminal.castShadow = true;
-    terminal.receiveShadow = true;
-    scene.add(terminal);
-
-    // Create the image display
-    createImageDisplay();
-
-    // Controls (Optional: OrbitControls for debugging view)
-    controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.copy(player.position); // Target player initially
-    controls.enablePan = false; // Optional: disable panning
-    controls.enableZoom = true;
-    controls.enableDamping = true; // Smooths rotation
-    controls.dampingFactor = 0.05;
-    // Lock vertical rotation somewhat
-    controls.minPolarAngle = Math.PI / 4; // radians
-    controls.maxPolarAngle = Math.PI / 1.8; // radians
-
-
-    // Event Listeners
-    window.addEventListener('resize', onWindowResize, false);
-    window.addEventListener('keydown', handleKeyDown, false);
-    window.addEventListener('keyup', handleKeyUp, false);
-    terminalInput.addEventListener('keydown', (event) => {
-        // Prevent WASD from moving player when typing in terminal
-        if (isTerminalOpen && ['w', 'a', 's', 'd'].includes(event.key.toLowerCase())) {
-            event.stopPropagation();
-        }
-         // Enter key is handled by the global keydown listener now,
-         // checking document.activeElement === terminalInput
-    });
-
-    // Initial camera position relative to player
-    // Set camera position AFTER player and controls are initialized
-    camera.position.copy(player.position);
-    camera.position.add(new THREE.Vector3(0, 4, 6)); // Offset from player
-    controls.update(); // Sync controls with new camera position and target
-
-
-    // Start Animation Loop
+    
+    // Create house
+    createHouse();
+    
+    // Create TV
+    createTV();
+    
+    // Create computer terminal
+    createComputer();
+    
+    // Add event listeners
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('resize', onWindowResize);
+    
+    // Fetch image when starting (optional)
+    checkForImages();
+    
+    // Start animation loop
     animate();
 }
 
-// --- Resize Handling ---
+function createHouse() {
+    // House dimensions
+    const houseSize = 20;
+    const wallHeight = 4;
+    const wallThickness = 1;
+    
+    // Create house group
+    house = new THREE.Group();
+    
+    // Floor
+    const floorGeometry = new THREE.BoxGeometry(houseSize, 0.2, houseSize);
+    const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 }); // Brown floor
+    const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+    floor.position.y = -0.1; // Half its height
+    floor.receiveShadow = true;
+    house.add(floor);
+    
+    // Walls material
+    const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xF5F5DC }); // Beige walls
+    
+    // North wall (with door gap)
+    const northWallGeometry1 = new THREE.BoxGeometry(7, wallHeight, wallThickness);
+    const northWall1 = new THREE.Mesh(northWallGeometry1, wallMaterial);
+    northWall1.position.set(-6.5, wallHeight/2, -houseSize/2 + wallThickness/2);
+    northWall1.castShadow = true;
+    northWall1.receiveShadow = true;
+    house.add(northWall1);
+    
+    const northWallGeometry2 = new THREE.BoxGeometry(7, wallHeight, wallThickness);
+    const northWall2 = new THREE.Mesh(northWallGeometry2, wallMaterial);
+    northWall2.position.set(6.5, wallHeight/2, -houseSize/2 + wallThickness/2);
+    northWall2.castShadow = true;
+    northWall2.receiveShadow = true;
+    house.add(northWall2);
+    
+    // Door (decorative)
+    const doorGeometry = new THREE.BoxGeometry(3, 3, 0.1);
+    const doorMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+    const door = new THREE.Mesh(doorGeometry, doorMaterial);
+    door.position.set(0, 1, -houseSize/2 + wallThickness/2 + 0.05);
+    house.add(door);
+    
+    // South wall
+    const southWallGeometry = new THREE.BoxGeometry(houseSize, wallHeight, wallThickness);
+    const southWall = new THREE.Mesh(southWallGeometry, wallMaterial);
+    southWall.position.set(0, wallHeight/2, houseSize/2 - wallThickness/2);
+    southWall.castShadow = true;
+    southWall.receiveShadow = true;
+    house.add(southWall);
+    
+    // East wall
+    const eastWallGeometry = new THREE.BoxGeometry(wallThickness, wallHeight, houseSize);
+    const eastWall = new THREE.Mesh(eastWallGeometry, wallMaterial);
+    eastWall.position.set(houseSize/2 - wallThickness/2, wallHeight/2, 0);
+    eastWall.castShadow = true;
+    eastWall.receiveShadow = true;
+    house.add(eastWall);
+    
+    // West wall
+    const westWallGeometry = new THREE.BoxGeometry(wallThickness, wallHeight, houseSize);
+    const westWall = new THREE.Mesh(westWallGeometry, wallMaterial);
+    westWall.position.set(-houseSize/2 + wallThickness/2, wallHeight/2, 0);
+    westWall.castShadow = true;
+    westWall.receiveShadow = true;
+    house.add(westWall);
+    
+    // Ceiling
+    const ceilingGeometry = new THREE.BoxGeometry(houseSize, 0.2, houseSize);
+    const ceilingMaterial = new THREE.MeshStandardMaterial({ color: 0xFFF5EE }); // Off-white ceiling
+    const ceiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
+    ceiling.position.y = wallHeight;
+    ceiling.receiveShadow = true;
+    house.add(ceiling);
+    
+    // Add furniture (optional)
+    // Couch
+    const couchGeometry = new THREE.BoxGeometry(4, 1, 1.5);
+    const couchMaterial = new THREE.MeshStandardMaterial({ color: 0x6B8E23 }); // Olive green
+    const couch = new THREE.Mesh(couchGeometry, couchMaterial);
+    couch.position.set(0, 0.5, 8);
+    couch.castShadow = true;
+    couch.receiveShadow = true;
+    house.add(couch);
+    
+    // Coffee table
+    const tableGeometry = new THREE.BoxGeometry(2, 0.5, 1);
+    const tableMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 }); // Brown
+    const table = new THREE.Mesh(tableGeometry, tableMaterial);
+    table.position.set(0, 0.25, 6);
+    table.castShadow = true;
+    table.receiveShadow = true;
+    house.add(table);
+    
+    // Add to scene
+    scene.add(house);
+}
+
+function createTV() {
+    // TV Stand
+    const standGeometry = new THREE.BoxGeometry(3, 1, 1);
+    const standMaterial = new THREE.MeshStandardMaterial({ color: 0x2F4F4F }); // Dark slate gray
+    const tvStand = new THREE.Mesh(standGeometry, standMaterial);
+    tvStand.position.set(0, 0.5, 4);
+    tvStand.castShadow = true;
+    tvStand.receiveShadow = true;
+    house.add(tvStand);
+    
+    // TV Body
+    const tvGeometry = new THREE.BoxGeometry(3, 2, 0.3);
+    const tvBodyMaterial = new THREE.MeshStandardMaterial({ color: 0x000000 }); // Black
+    tv = new THREE.Mesh(tvGeometry, tvBodyMaterial);
+    tv.position.set(0, 2, 4);
+    tv.castShadow = true;
+    house.add(tv);
+    
+    // TV Screen (separate mesh for the display)
+    const screenGeometry = new THREE.PlaneGeometry(2.7, 1.7);
+    const screenMaterial = new THREE.MeshBasicMaterial({ color: 0x333333 }); // Dark gray by default
+    imageDisplay = new THREE.Mesh(screenGeometry, screenMaterial);
+    imageDisplay.position.set(0, 0, 0.16); // Slightly in front of the TV body
+    tv.add(imageDisplay);
+    
+    // TV Remote
+    const remoteGeometry = new THREE.BoxGeometry(0.3, 0.1, 0.8);
+    const remoteMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 }); // Dark gray
+    tvRemote = new THREE.Mesh(remoteGeometry, remoteMaterial);
+    tvRemote.position.set(1, 0.3, 6); // On the coffee table
+    tvRemote.castShadow = true;
+    tvRemote.receiveShadow = true;
+    house.add(tvRemote);
+}
+
+function createComputer() {
+    // Desk
+    const deskGeometry = new THREE.BoxGeometry(3, 0.8, 1.5);
+    const deskMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 }); // Brown
+    const desk = new THREE.Mesh(deskGeometry, deskMaterial);
+    desk.position.set(-7, 0.4, 7);
+    desk.castShadow = true;
+    desk.receiveShadow = true;
+    house.add(desk);
+    
+    // Computer (MCP Terminal)
+    const computerGeometry = new THREE.BoxGeometry(1, 1, 0.5);
+    const computerMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 }); // Dark gray
+    computer = new THREE.Mesh(computerGeometry, computerMaterial);
+    computer.position.set(-7, 1.3, 7); // On the desk
+    computer.castShadow = true;
+    house.add(computer);
+    
+    // Monitor
+    const monitorGeometry = new THREE.BoxGeometry(1.5, 1, 0.1);
+    const monitorBodyMaterial = new THREE.MeshStandardMaterial({ color: 0x000000 }); // Black
+    const monitor = new THREE.Mesh(monitorGeometry, monitorBodyMaterial);
+    monitor.position.set(0, 0.7, -0.25); // In front of the computer
+    computer.add(monitor);
+    
+    // Monitor Screen
+    const screenGeometry = new THREE.PlaneGeometry(1.3, 0.8);
+    const screenMaterial = new THREE.MeshBasicMaterial({ color: 0x00FF00 }); // Green terminal screen
+    const screen = new THREE.Mesh(screenGeometry, screenMaterial);
+    screen.position.set(0, 0, 0.06); // Slightly in front of the monitor
+    monitor.add(screen);
+    
+    // Keyboard
+    const keyboardGeometry = new THREE.BoxGeometry(1, 0.05, 0.4);
+    const keyboardMaterial = new THREE.MeshStandardMaterial({ color: 0x444444 }); // Dark gray
+    const keyboard = new THREE.Mesh(keyboardGeometry, keyboardMaterial);
+    keyboard.position.set(-7, 0.85, 7.4); // In front of the monitor
+    keyboard.castShadow = true;
+    house.add(keyboard);
+    
+    // Chair
+    const chairSeatGeometry = new THREE.BoxGeometry(1, 0.1, 1);
+    const chairMaterial = new THREE.MeshStandardMaterial({ color: 0x444444 }); // Dark gray
+    const chairSeat = new THREE.Mesh(chairSeatGeometry, chairMaterial);
+    chairSeat.position.set(-7, 0.5, 8.5); // In front of the desk
+    chairSeat.castShadow = true;
+    chairSeat.receiveShadow = true;
+    house.add(chairSeat);
+    
+    // Chair Back
+    const chairBackGeometry = new THREE.BoxGeometry(1, 1, 0.1);
+    const chairBack = new THREE.Mesh(chairBackGeometry, chairMaterial);
+    chairBack.position.set(0, 0.5, -0.5); // Behind the seat
+    chairSeat.add(chairBack);
+}
+
 function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-// --- Animation Loop ---
 function animate() {
     requestAnimationFrame(animate);
+    
     const deltaTime = clock.getDelta();
-    const currentTime = clock.getElapsedTime();
-
-    // Update player movement
+    
+    // Handle player movement
     updatePlayerMovement(deltaTime);
     
-    // Periodically check for new images (every 10 seconds)
-    if (currentTime - lastCheckedImageTime > 10) {
-        lastCheckedImageTime = currentTime;
-        if (!isTerminalOpen) {  // Only check if terminal is not open
-            checkForImages();
-        }
+    // Update controls (if enabled)
+    if (controls && controls.enabled) {
+        controls.update();
     }
-
-    // Update controls
-    if (controls) {
-        // Update target smoothly only if player moved significantly
-        // or just keep it centered always if simpler
-        controls.target.copy(player.position);
-        controls.update(); // Handles damping and camera updates relative to target
-    }
-
-    // Check proximity to terminal
-    if (player && terminal) {
-        const distance = player.position.distanceTo(terminal.position);
-        isPlayerNearby = distance < INTERACTION_DISTANCE;
-        // Visual feedback for interaction possibility
-        terminal.material.emissive.setHex(isPlayerNearby && !isTerminalOpen ? 0x00ff00 : 0x000000); // Brighter green when nearby
-    } else {
-        isPlayerNearby = false; // Ensure flag is false if objects don't exist
-    }
-
-    // Render scene
+    
     renderer.render(scene, camera);
 }
 
-// --- Image Display Functions ---
-function createImageDisplay() {
-    // Create a simple plane to display the image
-    const geometry = new THREE.PlaneGeometry(10, 10); // Square plane for the image
-    const material = new THREE.MeshBasicMaterial({ 
-        color: 0xffffff,
-        side: THREE.DoubleSide
+function requestNewImage() {
+    // Request a new image for the TV
+    fetch(`${IMAGE_SERVER_URL}/generate-image`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            prompt: "Generate a beautiful landscape scene for TV", // Default prompt
+            // You could customize this with user input from terminalInput
+        }),
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.imageUrl) {
+            loadImageToDisplay(data.imageUrl);
+        }
+    })
+    .catch(error => {
+        console.error("Error generating image:", error);
     });
-    
-    imageDisplay = new THREE.Mesh(geometry, material);
-    imageDisplay.position.set(-8, 5, 0); // Position opposite to terminal
-    imageDisplay.rotation.y = Math.PI / 2; // Face toward center
-    
-    scene.add(imageDisplay);
-    console.log("Image display created");
-    
-    // Immediately check for images
-    checkForImages();
 }
 
 function checkForImages() {
-    // Simple function to check the folder for new images (via server endpoint)
-    console.log("Checking for images");
-    fetch(`${IMAGE_SERVER_URL}/api/latest-image`)
+    // Don't check too frequently
+    const now = Date.now();
+    if (now - lastCheckedImageTime < 2000) return; 
+    lastCheckedImageTime = now;
+    
+    fetch(`${IMAGE_SERVER_URL}/latest-image`)
         .then(response => response.json())
         .then(data => {
-            if (data.latestImage) {
-                console.log("Found image:", data.latestImage);
-                loadImageToDisplay(`${IMAGE_SERVER_URL}/${data.latestImage}`);
-            } else {
-                console.log("No images found");
+            if (data.imageUrl) {
+                loadImageToDisplay(data.imageUrl);
             }
         })
         .catch(error => {
-            console.error("Error checking for images:", error);
+            console.error("Error fetching latest image:", error);
         });
 }
 
 function loadImageToDisplay(imageUrl) {
-    console.log("Loading image:", imageUrl);
+    // Clean up previous texture if it exists
+    if (currentImageTexture) {
+        currentImageTexture.dispose();
+    }
     
-    // Create texture loader
+    // Create a new texture from the image URL
     const textureLoader = new THREE.TextureLoader();
-    textureLoader.crossOrigin = 'anonymous';
-    
-    // Load the image
     textureLoader.load(
         imageUrl,
-        (texture) => {
-            // Success - image loaded
-            console.log("Image loaded successfully");
-            
-            // Dispose of previous texture if it exists
-            if (currentImageTexture) {
-                currentImageTexture.dispose();
-            }
-            
-            // Update the material with the new texture
+        function(texture) {
+            // Store reference for cleanup
             currentImageTexture = texture;
-            if (imageDisplay && imageDisplay.material) {
-                imageDisplay.material.map = texture;
-                imageDisplay.material.needsUpdate = true;
-            }
+            
+            // Update the TV display with the new texture
+            const newMaterial = new THREE.MeshBasicMaterial({ map: texture });
+            imageDisplay.material = newMaterial;
         },
-        (xhr) => {
-            // Progress
-            console.log(`Image loading: ${Math.round((xhr.loaded / xhr.total) * 100)}% loaded`);
-        },
-        (error) => {
-            // Error
-            console.error("Error loading image:", error);
+        undefined, // onProgress callback not needed
+        function(error) {
+            console.error("Error loading image texture:", error);
+            // Fallback to a solid color if loading fails
+            imageDisplay.material = new THREE.MeshBasicMaterial({ color: 0x333333 });
         }
     );
 }
 
-// --- Start ---
+// Initialize the game
 init();
